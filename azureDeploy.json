@@ -8,25 +8,125 @@
                 "description": "The name of the function app that you wish to create."
             }
         },
+        "appServicePlan" : {
+            "type": "string",
+            "defaultValue": "ServicePlan",
+            "allowedValues": [
+                "ServicePlan",
+                "Consumption"
+            ],
+            "metadata": {
+                "description": "ServicePlan creates an App Service Plan and is billed according to that plan. Consumption bills according to https://azure.microsoft.com/en-gb/pricing/details/functions/."
+            }
+        },
+        "appServicePlanTier": {
+            "type": "string",
+            "allowedValues": [
+                "Free",
+                "Shared",
+                "Basic",
+                "Standard",
+                "Premium",
+                "Isolated"
+            ],
+            "defaultValue": "",
+            "metadata": {
+                "description": "ServicePlan only: See here for details: https://azure.microsoft.com/en-us/pricing/details/app-service/windows/"
+            }
+        },
+        "appServicePlanName": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "ServicePlan only: Plan name must match with plan tier. See here for details: https://azure.microsoft.com/en-us/pricing/details/app-service/windows/"
+            }
+        },
+        "appServicePlanCapacity": {
+            "type": "int",
+            "defaultValue": 2
+        },
         "githubRepoURL": {
-            "type": "string"
+            "type": "string",
+            "defaultValue": "https://github.com/Microsoft/AzureNetworkWatcherNSGFlowLogsConnector.git"
         },
         "githubRepoBranch": {
-            "type": "string"
+            "type": "string",
+            "defaultValue": "master"
+        },        
+        "nsgSourceDataConnection": {
+            "type": "string",
+            "metadata": {
+                "description": "Mandatory storage account connection string for nsg flow log data."
+            }
         },
-        "eventHubConnectionString": {
-            "type": "string"
+        "cefLogAccount": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "ArcSight only: Optional storage account connection string for CEF log tracing."
+            }
         },
-        "appSetting1": {
-            "type": "string"
+        "outputBinding": {
+            "type": "string",
+            "allowedValues": [
+                "arcsight",
+                "splunk",
+                "eventhub",
+                "logstash"
+            ],
+            "defaultValue": "arcsight",
+            "metadata": {
+                "description": "Select the desired destination for your logs."
+            }
         },
-        "appSetting2": {
-            "type": "string"
+        "arcsightAddress": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "ArcSight only: IP or DNS address of ingestion endpoint."
+            }
+        },
+        "arcsightPort": {
+            "type": "string",
+            "defaultValue": "1514",
+            "metadata": {
+                "description": "ArcSight only: TCP port of ingestion endpoint. Defaults to 1514."
+            }
+        },
+        "splunkAddress": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "Splunk only: IP or DNS address of HEC port."
+            }
+        },
+        "splunkToken": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "Splunk only: authentication token for the HEC port."
+            }
+        },
+        "eventHubConnection": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "Event hub only: Connection string for event hub namespace."
+            }
+        },
+        "eventHubName": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "Event hub only: Event hub name."
+            }
         }
     },
     "variables": {
         "functionAppName": "[parameters('appName')]",
-        "hostingPlanName": "[variables('functionAppName')]",
+	    "ServicePlan": "[concat('serviceplan', parameters('appName'))]",
+        "Consumption": "[concat('consumption', parameters('appName'))]",
+        "hostingPlanName": "[variables(parameters('appServicePlan'))]",
         "storageAccountName": "[concat('func', uniquestring(resourceGroup().id))]",
         "storageAccountid": "[concat(resourceGroup().id,'/providers/','Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]"
     },
@@ -34,25 +134,39 @@
         {
             "type": "Microsoft.Storage/storageAccounts",
             "name": "[variables('storageAccountName')]",
-            "apiVersion": "2015-06-15",
+            "apiVersion": "2018-11-01",
             "location": "[resourceGroup().location]",
-            "properties": {
-                "accountType": "Standard_LRS"
+            "kind": "Storage",
+            "sku": {
+                "name": "Standard_LRS"
             }
         },
         {
+            "condition": "[equals(parameters('appServicePlan'), 'ServicePlan')]",
             "type": "Microsoft.Web/serverfarms",
-            "apiVersion": "2015-04-01",
-            "name": "[variables('hostingPlanName')]",
+            "apiVersion": "2018-11-01",
+            "name": "[variables('ServicePlan')]",
+            "location": "[resourceGroup().location]",
+            "sku": {
+                "tier": "[parameters('appServicePlanTier')]",
+                "name": "[parameters('appServicePlanName')]",
+                "capacity": "[parameters('appServicePlanCapacity')]"
+            }
+        },
+        {
+            "condition": "[equals(parameters('appServicePlan'), 'Consumption')]",
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2018-11-01",
+            "name": "[variables('Consumption')]",
             "location": "[resourceGroup().location]",
             "properties": {
-                "name": "[variables('hostingPlanName')]",
+                "name": "[variables('Consumption')]",
                 "computeMode": "Dynamic",
                 "sku": "Dynamic"
             }
         },
         {
-            "apiVersion": "2016-08-01",
+            "apiVersion": "2018-11-01",
             "type": "Microsoft.Web/sites",
             "name": "[variables('functionAppName')]",
             "location": "[resourceGroup().location]",
@@ -90,19 +204,63 @@
                             "value": "6.5.0"
                         },
                         {
-                            "name": "appSetting1",
-                            "value": "[parameters('appSetting1')]"
+                            "name": "blobContainerName",
+                            "value": "insights-logs-networksecuritygroupflowevent"
                         },
                         {
-                            "name": "appSetting2",
-                            "value": "[parameters('appSetting2')]"
+                            "name": "nsgSourceDataAccount",
+                            "value": "nsgSourceDataConnection"
+                        },
+                        {
+                            "name": "nsgSourceDataConnection",
+                            "value": "[parameters('nsgSourceDataConnection')]"
+                        },
+                        {
+                            "name": "outputBinding",
+                            "value": "[parameters('outputBinding')]"
+                        },
+                        {
+                            "name": "arcsightAddress",
+                            "value": "[parameters('arcsightAddress')]"
+                        },
+                        {
+                            "name": "arcsightPort",
+                            "value": "[parameters('arcsightPort')]"
+                        },
+                        {
+                            "name": "splunkAddress",
+                            "value": "[parameters('splunkAddress')]"
+                        },
+                        {
+                            "name": "splunkToken",
+                            "value": "[parameters('splunkToken')]"
+                        },
+                        {
+                            "name": "eventHubConnection",
+                            "value": "[parameters('eventHubConnection')]"
+                        },
+                        {
+                            "name": "eventHubName",
+                            "value": "[parameters('eventHubName')]"
+                        },
+                        {
+                            "name": "cefLogAccount",
+                            "value": "[parameters('cefLogAccount')]"
+                        },
+                        {
+                            "name": "logIncomingJSON",
+                            "value": "false"
+                        },
+                        {
+                            "name": "logOutgoingCEF",
+                            "value": "false"
                         }
                     ]
                 }
             },
             "resources": [
                 {
-                    "apiVersion": "2016-08-01",
+                    "apiVersion": "2018-11-01",
                     "name": "web",
                     "type": "sourcecontrols",
                     "dependsOn": [
